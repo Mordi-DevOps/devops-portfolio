@@ -1,0 +1,119 @@
+pipeline {
+    agent { label 'docker-agent' }
+
+    environment {
+	// Generic artifactory URL name used only for GitHub. 
+        ARTIFACTORY_URL = 'http://artifactory-url:8082/artifactory'
+        ARTIFACTORY_REPO = 'libs-release-local'
+        SONARQUBE = 'SonarQube'
+    }
+
+    options {
+        // Clean workspace before build
+        skipDefaultCheckout(false)
+        timestamps()
+    }
+
+    stages {
+
+        stage('Check Workspace & Dockerfile') {
+            steps {
+                        sh 'ls -la'
+            }
+        }
+
+        stage('Cleanup') {
+            steps {
+                script {
+                    echo "Cleaning workspace and old Docker images..."
+                    // Clean Jenkins workspace
+                    deleteDir()
+	            checkout scm  // re-clone repository so Dockerfile & source code exist
+                    // Remove dangling Docker images
+                    //sh '''
+                    // docker image prune -af || true
+                    //'''
+                }
+            }
+        }
+
+        stage('Maven Build') {
+            steps {
+                script {
+                    docker.image('maven:3.9.6-eclipse-temurin-17').inside {
+                        sh 'mvn clean package -DskipTests'
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    echo "Building Docker image..."
+                    sh 'docker build -t calculator-java:latest .'
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+		        withSonarQubeEnv('SonarQube') {  // Name of SonarQube server in Jenkins
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_AUTH_TOKEN')]) {
+	                    script {
+	                        docker.image('sonarsource/sonar-scanner-cli:latest').inside {
+	                            sh """
+	                                sonar-scanner \
+	                                -Dsonar.projectKey=calculator-java \
+	                                -Dsonar.sources=. \
+	                                -Dsonar.host.url=$SONAR_HOST_URL \
+	                                -Dsonar.login=$SONAR_AUTH_TOKEN
+	                            """
+	                        }
+			            }
+                    }
+                }
+	        }
+        }
+
+        stage('Push Artifact to Artifactory') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'artifactory-creds',
+                        usernameVariable: 'JFROG_USER',
+                        passwordVariable: 'JFROG_PASSWORD'
+                    )
+                ]) {
+                    script {
+                        docker.image('releases-docker.jfrog.io/jfrog/jfrog-cli:latest').inside {
+                            sh '''
+                                export JFROG_CLI_HOME="$WORKSPACE/.jfrog"
+                                jfrog config add my-artifactory \
+                                --artifactory-url="${ARTIFACTORY_URL}" \
+                                --user="$JFROG_USER" \
+                                --password="$JFROG_PASSWORD" \
+                                --interactive=false
+                                jfrog rt upload "target/*.jar" "${ARTIFACTORY_REPO}/"
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Build successful!'
+        }
+        failure {
+            echo 'Build failed.'
+        }
+	always {
+            // Clean workspace to free up Jenkins agent disk space
+            cleanWs()
+            echo 'Workspace cleaned.'
+        }
+    }
+}

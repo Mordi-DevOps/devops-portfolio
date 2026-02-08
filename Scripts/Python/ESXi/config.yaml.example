@@ -1,0 +1,4 @@
+esxi:
+  hostname: "0.0.0.0"
+  username: "your_username"
+  password: "your_password"
