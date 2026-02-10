@@ -43,5 +43,5 @@ The focus of this repository is on **Automation**, **System Administration**, an
 ---
 
 ## 📫 Connect with me
-- **LinkedIn:** soon
+- **LinkedIn:** [soon](https://www.linkedin.com/in/mordi-maor/)
 - **Email:** mordechaymaor@gmail.com
